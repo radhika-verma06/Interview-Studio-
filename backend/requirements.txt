@@ -4,6 +4,7 @@ sqlalchemy
 pydantic
 python-dotenv
 openai
+groq
 python-multipart
 passlib[bcrypt]
 python-jose[cryptography]
