@@ -34,6 +34,10 @@ app.add_middleware(
 def read_root():
     return {"message": "Welcome to InterviewIQ: AI Mock Interview Coach API"}
 
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
 @app.post("/knowledge/documents", response_model=schemas.KnowledgeDocument)
 def create_knowledge_document(payload: schemas.KnowledgeDocumentCreate, db: Session = Depends(get_db)):
     user = get_or_create_mvp_user(db)
