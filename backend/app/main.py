@@ -22,9 +22,11 @@ models.Base.metadata.create_all(bind=engine)
 app = FastAPI(title="InterviewIQ API")
 app.include_router(auth.router)
 
+frontend_url = os.getenv("FRONTEND_URL", "*")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[frontend_url] if frontend_url != "*" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -567,20 +569,38 @@ def get_dashboard(db: Session = Depends(get_db)):
     avg_score = sum(all_scores) / len(all_scores) if all_scores else 0
     best_score = max(all_scores) if all_scores else 0
 
-    # Skill breakdown based on categories in answers
-    # This would ideally query all answers for the user
-    # Simplified for MVP:
+    # Calculate real skill breakdown from recent answers
+    skill_totals = {}
+    skill_counts = {}
+    for session in sessions:
+        for answer in session.answers:
+            if answer.question and answer.question.category:
+                cat = _normalize_category(answer.question.category)
+                if cat not in skill_totals:
+                    skill_totals[cat] = 0
+                    skill_counts[cat] = 0
+                skill_totals[cat] += answer.overall_score
+                skill_counts[cat] += 1
+                
+    skill_breakdown = {
+        cat: int(skill_totals[cat] / skill_counts[cat])
+        for cat in skill_totals
+    }
+    
+    # Fallback to some defaults if not enough data
+    if not skill_breakdown:
+        skill_breakdown = {
+            "Fundamentals": 0,
+            "Deep Learning": 0,
+            "System Design": 0
+        }
+
     return {
         "total_interviews": total_interviews,
         "avg_score": round(avg_score, 1),
         "best_score": best_score,
         "recent_sessions": sorted(sessions, key=lambda x: x.started_at, reverse=True)[:5],
-        "skill_breakdown": {
-            "Fundamentals": 85,
-            "Deep Learning": 72,
-            "NLP": 90,
-            "System Design": 65
-        }
+        "skill_breakdown": skill_breakdown
     }
 
 @app.post("/transcribe")
