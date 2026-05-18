@@ -5,18 +5,6 @@ Interview Studio is an AI-powered mock interview platform designed to help users
 
 The system combines LLM-based interviewing, resume-aware question generation, voice transcription, and structured feedback to simulate real interview experiences and help users improve communication, confidence, and technical depth.
 
----
-
-## 🚀 Live Deployment
-
-### Frontend
-https://interview-studio-.vercel.app/
-
-### Backend
-FastAPI backend deployed via Railway.
-
----
-
 ## ✨ Core Features
 
 ### 🎯 Custom Interview Sessions
