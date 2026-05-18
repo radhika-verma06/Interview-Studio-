@@ -1,97 +1,209 @@
-# 🎙️ Interview Studio 
+# 🎙️ Interview Studio  
+### AI-Powered Mock Interview & Coaching Platform
 
-Interview Studio is a premium, AI-powered mock interview platform designed for the modern talent. With a cinematic focus, turn-by-turn insights, and high-fidelity mock sessions, it enables users to practice smarter and get immediate, actionable feedback on their performance.
+Interview Studio is an AI-powered mock interview platform designed to help users practice technical and behavioural interviews through realistic, adaptive interview sessions.
 
-![Frontend UI Demo](/frontend/public/favicon.ico)
-
----
-
-## 🌟 Key Features
-
-*   **Customizable Sessions:** Choose your target role (Software Engineer, AI Engineer, etc.), company style (Big Tech, Startups, etc.), difficulty, and interview type.
-*   **Dual AI Routing Engine:** Uses Groq (Llama-3.3-70b) for lightning-fast latency by default, with an OpenAI API fallback and a full offline mock evaluation mode.
-*   **Dynamic RAG (Retrieval-Augmented Generation):** Upload your resume, job description, or study notes. The AI smartly pulls relevant chunks and weaves them into the interview questions and evaluations.
-*   **Voice & Audio Support:** Integrated with Whisper for real-time audio transcription so you can speak your answers naturally.
-*   **Live Coach & Silence Detection:** The live interviewer reacts dynamically to your pacing, silence, and text.
-*   **Actionable Feedback Panel:** Get a 5-axis score breakdown (Accuracy, Depth, Clarity, Examples, Readiness), a rewritten "stronger" answer, and a customized follow-up drill directly after answering.
-*   **Adaptive Drills:** The system tracks your performance per skill area and uses spaced repetition (24h/72h/7d) for low-scoring topics.
+The system combines LLM-based interviewing, resume-aware question generation, voice transcription, and structured feedback to simulate real interview experiences and help users improve communication, confidence, and technical depth.
 
 ---
 
-## 🌐 Live Deployments
+## 🚀 Live Deployment
 
-*   **Frontend (Vercel):** [https://interview-studio-.vercel.app/](https://interview-studio-.vercel.app/) *(example link, update if needed)*
-*   **Backend (Railway):** [Deployment active]
+### Frontend
+https://interview-studio-.vercel.app/
 
----
-
-## 🏗️ Architecture
-
-*   **Frontend:** Next.js (App Router), React 19, Tailwind CSS v4, Lucide Icons.
-*   **Backend:** FastAPI, Python 3.x, SQLAlchemy Core, PostgreSQL (via psycopg2) / SQLite fallback.
-*   **Auth:** JWT-based stateless authentication (currently equipped with an MVP default mode for quick access).
+### Backend
+FastAPI backend deployed via Railway.
 
 ---
 
-## 💻 Local Development
+## ✨ Core Features
 
-### 1. Setup the Backend
+### 🎯 Custom Interview Sessions
+Users can configure:
+- target role
+- interview difficulty
+- company style
+- interview type
+- behavioural or technical focus
+
+### 🧠 AI Interview Engine
+Supports:
+- Groq Llama 3.3 70B
+- OpenAI fallback routing
+- adaptive interview flow
+- contextual follow-up questions
+
+### 📄 Resume & Job Description Awareness
+Users can upload:
+- resumes
+- job descriptions
+- study notes
+
+The system uses retrieval-based context injection to personalise interview questions and evaluations.
+
+### 🎙️ Voice Transcription
+Integrated speech-to-text support using Whisper-style transcription workflows for natural spoken responses.
+
+### 📊 Structured Feedback
+Provides:
+- response scoring
+- communication analysis
+- clarity evaluation
+- technical depth analysis
+- readiness feedback
+- stronger rewritten answer suggestions
+
+### 🔁 Adaptive Practice
+Tracks weaker areas and recommends targeted follow-up drills.
+
+---
+
+## 🏗️ System Architecture
+
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js, React, Tailwind CSS |
+| Backend | FastAPI |
+| Database | PostgreSQL / SQLite fallback |
+| AI Models | Groq Llama 3.3 70B, OpenAI |
+| Authentication | JWT |
+| Deployment | Vercel + Railway |
+| Language | Python + JavaScript |
+
+---
+
+## 📦 Local Development Setup
+
+## 1. Clone the repository
+
+```bash
+git clone https://github.com/radhika-verma06/Interview-Studio-.git
+cd Interview-Studio-
+```
+
+---
+
+## 2. Backend Setup
 
 ```bash
 cd backend
+
 python3 -m venv venv
 source venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
-Create a `.env` file in the `backend/` folder:
+Create a `.env` file inside `backend/`:
 
 ```env
 GROQ_API_KEY=your_groq_api_key
-OPENAI_API_KEY=your_optional_openai_key
+OPENAI_API_KEY=your_openai_key
 FRONTEND_URL=http://localhost:3000
-DATABASE_URL=sqlite:///./interview_iq.db # Or your Postgres connection string
+DATABASE_URL=sqlite:///./interview_iq.db
 ```
 
-Run the backend server:
+Run backend:
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 2. Setup the Frontend
+---
+
+## 3. Frontend Setup
 
 ```bash
 cd frontend
+
 npm install
+npm run dev
 ```
 
-Create a `.env.local` file in the `frontend/` folder:
+Create `.env.local` inside `frontend/`:
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-Run the dev server:
+Frontend runs at:
 
-```bash
-npm run dev
+```text
+http://localhost:3000
 ```
-
-The app will be available at [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## 🚀 Deployment Instructions
+## 📁 Project Structure
 
-### Vercel (Frontend)
-The app is natively configured for Vercel. 
-1. Import your GitHub repository to Vercel.
-2. In the Vercel project settings, set the **Root Directory** to `frontend`.
-3. Vercel will automatically correctly detect Next.js and deploy.
+```text
+Interview-Studio-/
+├── backend/
+│   ├── app/
+│   ├── requirements.txt
+│   └── railway.toml
+├── frontend/
+│   ├── app/
+│   ├── components/
+│   ├── public/
+│   └── package.json
+└── README.md
+```
 
-### Railway (Backend)
-1. Link your GitHub repository to Railway.
-2. The custom `railway.toml` config will automatically configure a Nixpacks build, `cd` into the backend directory, and run the `uvicorn` startup command.
-3. Add a PostgreSQL database plugin in your Railway dashboard (the backend is equipped to handle `psycopg2` via your `requirements.txt`).
-4. Set the `GROQ_API_KEY` in the Railway environment variables.
+---
+
+## 💡 Problem This Project Solves
+
+Most interview preparation tools provide static questions without realistic interaction or detailed coaching.
+
+Interview Studio focuses on:
+- adaptive questioning
+- personalised interview simulation
+- actionable feedback
+- realistic interview pacing
+- resume-aware preparation
+
+The goal is to help users improve interview performance through repeated AI-assisted practice.
+
+---
+
+## ⚠️ Current Limitations
+
+- AI feedback quality depends on transcript quality
+- Requires external AI API services
+- Long interview sessions may increase latency
+- Voice transcription accuracy depends on microphone quality
+
+---
+
+## 🔮 Future Improvements
+
+- Real-time avatar interviewer
+- Multi-language interview support
+- Live coding interview mode
+- Team collaboration sessions
+- Interview analytics dashboard
+- Emotion and confidence tracking
+- Calendar integration
+
+---
+
+## 🚀 Deployment
+
+### Frontend Deployment
+Deploy using Vercel.
+
+### Backend Deployment
+Deploy FastAPI backend using Railway or Render.
+
+---
+
+## 📄 License
+
+MIT License
+
+---
+
+### Developed by Radhika Verma  
+AI Student | Applied AI Products | Human-Centered AI Systems
