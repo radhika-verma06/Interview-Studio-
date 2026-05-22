@@ -1,6 +1,5 @@
 import os
 import json
-import random
 import re
 from collections import Counter
 from typing import Dict, Any, List, Optional
@@ -9,44 +8,369 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class AIService:
     def __init__(self):
         self.groq_key = os.getenv("GROQ_API_KEY")
+        self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.openai_key = os.getenv("OPENAI_API_KEY")
-        
-        # Prefer Groq for its speed and free tier as requested
+
+        # Build provider list: Groq → Gemini → OpenAI
+        self.providers: List[Dict[str, Any]] = []
         if self.groq_key:
-            self.client = OpenAI(
-                api_key=self.groq_key,
-                base_url="https://api.groq.com/openai/v1"
+            client = OpenAI(api_key=self.groq_key, base_url="https://api.groq.com/openai/v1")
+            self.providers.append({
+                "name": "Groq",
+                "client": client,
+                "model": "llama-3.3-70b-versatile",
+                "whisper": "whisper-large-v3",
+            })
+            print("AI Service initialized with Groq provider")
+        if self.gemini_key:
+            client = OpenAI(
+                api_key=self.gemini_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
             )
-            self.model = "llama-3.3-70b-versatile"
-            self.whisper_model = "whisper-large-v3"
-            print("AI Service initialized with Groq")
-        elif self.openai_key:
-            self.client = OpenAI(api_key=self.openai_key)
-            self.model = "gpt-4-turbo"
-            self.whisper_model = "whisper-1"
-            print("AI Service initialized with OpenAI")
-        else:
-            self.client = None
+            self.providers.append({
+                "name": "Gemini",
+                "client": client,
+                "model": "gemini-1.5-flash",
+                "whisper": None,
+            })
+            print("AI Service initialized with Gemini provider")
+        if self.openai_key:
+            client = OpenAI(api_key=self.openai_key)
+            self.providers.append({
+                "name": "OpenAI",
+                "client": client,
+                "model": "gpt-4o-mini",
+                "whisper": "whisper-1",
+            })
+            print("AI Service initialized with OpenAI provider")
+
+        if not self.providers:
+            self.providers.append({
+                "name": "Mock",
+                "client": None,
+                "model": None,
+                "whisper": None,
+            })
             print("AI Service initialized in Mock mode")
 
+        # Convenience references to primary provider
+        primary = self.providers[0]
+        self.client = primary["client"]
+        self.model = primary["model"]
+        self.whisper_model = primary["whisper"]
+
+    # ------------------------------------------------------------------
+    # Core helper: try each provider in order for chat completions
+    # ------------------------------------------------------------------
+    def _try_chat(
+        self,
+        messages: List[Dict[str, str]],
+        response_format: Optional[Dict[str, str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        for provider in self.providers:
+            client = provider["client"]
+            model = provider["model"]
+            if not client or not model:
+                continue  # Mock – skip
+            try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    response_format=response_format,
+                )
+                return json.loads(resp.choices[0].message.content)
+            except Exception as e:
+                print(f"{provider['name']} chat error: {e}; trying next provider")
+                continue
+        return None
+
+    # ------------------------------------------------------------------
+    # Core helper: try each provider in order for audio transcription
+    # ------------------------------------------------------------------
+    def _try_transcribe(self, audio_file_path: str) -> Optional[str]:
+        for provider in self.providers:
+            client = provider["client"]
+            whisper_model = provider["whisper"]
+            if not client or not whisper_model:
+                continue
+            try:
+                with open(audio_file_path, "rb") as f:
+                    transcript = client.audio.transcriptions.create(
+                        model=whisper_model, file=f
+                    )
+                return transcript.text
+            except Exception as e:
+                print(f"{provider['name']} transcription error: {e}; trying next provider")
+                continue
+        return None
+
+    # ------------------------------------------------------------------
+    # Public API: generate_question
+    # Flow: Mock-short-circuit → conditional RAG → _try_chat → mock fallback
+    # ------------------------------------------------------------------
+    async def generate_question(
+        self,
+        role: str,
+        company_mode: str,
+        difficulty: str,
+        interview_type: str,
+        focus_area: Optional[str],
+        previous_questions: List[str],
+        retrieved_context: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, str]:
+        focus = focus_area or interview_type or "General"
+
+        # Short-circuit to mock if no real providers are configured
+        if self.providers[0]["name"] == "Mock":
+            return self._get_mock_question(
+                role, company_mode, difficulty, interview_type, focus,
+                previous_questions, retrieved_context,
+            )
+
+        # Conditionally retrieve RAG context only when not supplied by caller
+        if not retrieved_context:
+            try:
+                from app.database import SessionLocal
+                from app.rag import retrieve_context
+                db = SessionLocal()
+                try:
+                    query = f"{role} {company_mode} interview"
+                    retrieved_context = retrieve_context(db, query=query, top_k=5)
+                finally:
+                    db.close()
+            except Exception as e:
+                print(f"RAG retrieval error (non-fatal): {e}")
+                retrieved_context = []
+
+        context_text = "\n\n".join(
+            f"[{item.get('source_type', 'context')}: {item.get('title', 'Untitled')}]\n{item.get('content', '')}"
+            for item in (retrieved_context or [])
+        )
+
+        prompt = f"""
+You are a senior interviewer creating one realistic mock interview question.
+
+Candidate role: {role}
+Company style: {company_mode}
+Difficulty: {difficulty}
+Interview type: {interview_type}
+Focus area: {focus}
+Questions already asked: {previous_questions}
+Retrieved candidate/job/company context:
+{context_text or "No retrieved context was available."}
+
+Create a question that is specific, interview-realistic, and not a trivia prompt.
+If retrieved context exists, ground the question in it without inventing facts not present in the context.
+Return ONLY valid JSON:
+{{
+  "role": "{role}",
+  "category": "short category",
+  "difficulty": "{difficulty}",
+  "company_mode": "{company_mode}",
+  "question_text": "one interview question",
+  "ideal_answer": "concise coverage checklist for a strong answer"
+}}
+"""
+
+        response = self._try_chat(
+            [{"role": "system", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        if response:
+            return response
+
+        # All providers failed – fall back to mock
+        return self._get_mock_question(
+            role, company_mode, difficulty, interview_type, focus,
+            previous_questions, retrieved_context,
+        )
+
+    # ------------------------------------------------------------------
+    # Public API: evaluate_answer
+    # ------------------------------------------------------------------
+    async def evaluate_answer(
+        self,
+        question: str,
+        answer: str,
+        category: str,
+        difficulty: str,
+        company_mode: str,
+        retrieved_context: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
+        if self.providers[0]["name"] == "Mock":
+            return self._get_mock_evaluation(question, answer, category, retrieved_context)
+
+        context_text = "\n\n".join(
+            f"[{item.get('source_type', 'context')}: {item.get('title', 'Untitled')}]\n{item.get('content', '')}"
+            for item in (retrieved_context or [])
+        )
+
+        prompt = f"""
+You are a senior technical interviewer evaluating a candidate's answer.
+
+Question: {question}
+Candidate answer: {answer}
+Category: {category}
+Difficulty: {difficulty}
+Company interview style: {company_mode}
+Retrieved candidate/job/company context:
+{context_text or "No retrieved context was available."}
+
+Evaluate the answer using this rubric:
+1. Accuracy (0-10)
+2. Depth (0-10)
+3. Clarity (0-10)
+4. Examples (0-10)
+5. Readiness (0-10)
+
+Return ONLY valid JSON in this exact format:
+{{
+  "concept_accuracy": 0,
+  "technical_depth": 0,
+  "clarity": 0,
+  "examples": 0,
+  "interview_readiness": 0,
+  "overall_score": 0,
+  "strengths": ["string"],
+  "weaknesses": ["string"],
+  "improvement_suggestions": ["string"],
+  "ideal_answer": "string",
+  "improved_user_answer": "string",
+  "follow_up_question": "string",
+  "detected_weak_area": "string"
+}}
+"""
+
+        response = self._try_chat(
+            [{"role": "system", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        if response:
+            return response
+
+        return self._get_mock_evaluation(question, answer, category, retrieved_context)
+
+    # ------------------------------------------------------------------
+    # Public API: transcribe_audio
+    # ------------------------------------------------------------------
+    async def transcribe_audio(self, audio_file_path: str) -> str:
+        if self.providers[0]["name"] == "Mock":
+            return "Mock: Transcription demo."
+        result = self._try_transcribe(audio_file_path)
+        return result if result else "Error transcribing audio."
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
     def _context_terms(self, retrieved_context: Optional[List[Dict[str, str]]]) -> List[str]:
         if not retrieved_context:
             return []
         text = " ".join(item.get("content", "") for item in retrieved_context)
         stopwords = {
-            "about", "after", "also", "and", "are", "because", "from", "have", "into",
-            "that", "the", "their", "this", "with", "would", "your",
+            "about", "after", "also", "and", "are", "because", "from", "have",
+            "into", "that", "the", "their", "this", "with", "would", "your",
         }
         terms = [
-            term
-            for term in re.findall(r"[a-zA-Z][a-zA-Z0-9_+#.-]{3,}", text.lower())
-            if term not in stopwords
+            t for t in re.findall(r"[a-zA-Z][a-zA-Z0-9_+#.-]{3,}", text.lower())
+            if t not in stopwords
         ]
-        return [term for term, _count in Counter(terms).most_common(12)] if terms else []
+        return [t for t, _ in Counter(terms).most_common(12)] if terms else []
 
+    # ------------------------------------------------------------------
+    # Mock: question generation
+    # ------------------------------------------------------------------
+    def _get_mock_question(
+        self,
+        role: str,
+        company_mode: str,
+        difficulty: str,
+        interview_type: str,
+        focus_area: str,
+        previous_questions: List[str],
+        retrieved_context: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, str]:
+        category = focus_area if focus_area and focus_area != "General" else interview_type
+
+        if retrieved_context:
+            primary_context = retrieved_context[0]
+            source_label = primary_context.get("source_type", "context").replace("_", " ")
+            source_title = primary_context.get("title", "uploaded context")
+            snippet = " ".join(primary_context.get("content", "").split())[:260]
+            return {
+                "role": role,
+                "category": "Resume-based" if source_label == "resume" else category,
+                "difficulty": difficulty if difficulty != "Mixed" else "Medium",
+                "company_mode": company_mode,
+                "question_text": (
+                    f"Your uploaded {source_label} ({source_title}) includes: \"{snippet}\". "
+                    f"In a {role} interview at {company_mode}, walk me through the most relevant experience or decision here. "
+                    "What was the problem, what trade-offs did you make, what did you measure, and what would you do differently?"
+                ),
+                "ideal_answer": (
+                    "A strong answer ties directly to the uploaded context, makes the candidate's role explicit, "
+                    "explains the decision and trade-offs, quantifies impact where possible, and reflects on learning."
+                ),
+            }
+
+        if "product" in role.lower():
+            question = (
+                f"You're PM for an AI interview coach at {company_mode}. Candidate completion is high, "
+                "but users are not improving. What would you diagnose, build, and measure?"
+            )
+            ideal = (
+                "Clarify user segments, define readiness metrics, inspect funnel and feedback quality, "
+                "prioritize interventions, guard against vanity metrics, and propose an experiment plan."
+            )
+        elif "data" in role.lower():
+            question = (
+                f"A {company_mode} team says interview practice improves hiring outcomes, "
+                "but the data is noisy. How would you design the analysis?"
+            )
+            ideal = (
+                "Define cohorts, baseline, leading and lagging metrics, confounders, "
+                "experiment or quasi-experiment design, guardrails, and decision thresholds."
+            )
+        elif "software" in role.lower():
+            question = (
+                "Design the backend for a live mock interview platform. "
+                "How would you handle sessions, transcript events, scoring jobs, and failures?"
+            )
+            ideal = (
+                "Cover APIs, data model, queues, streaming events, retries, idempotency, "
+                "storage, observability, privacy, and scale trade-offs."
+            )
+        else:
+            question = (
+                f"Design an adaptive AI mock interview system for {role} candidates at {company_mode}. "
+                "How should it choose the next question after each answer?"
+            )
+            ideal = (
+                "Cover candidate profile, rubric scoring, weak-area detection, question selection, "
+                "follow-up probes, evaluation data, guardrails, and continuous improvement."
+            )
+
+        if previous_questions and question in previous_questions:
+            question = (
+                f"Follow-up on {category}: what is the hardest trade-off in your previous approach, "
+                "and how would you defend it to a skeptical interviewer?"
+            )
+
+        return {
+            "role": role,
+            "category": category,
+            "difficulty": difficulty if difficulty != "Mixed" else "Medium",
+            "company_mode": company_mode,
+            "question_text": question,
+            "ideal_answer": ideal,
+        }
+
+    # ------------------------------------------------------------------
+    # Mock: answer evaluation
+    # ------------------------------------------------------------------
     def _get_mock_evaluation(
         self,
         question: str,
@@ -54,17 +378,18 @@ class AIService:
         category: str,
         retrieved_context: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
-        """Provides rubric-based feedback when API key is missing."""
-        words = [word for word in answer.strip().split() if word]
+        words = [w for w in answer.strip().split() if w]
         lower_answer = answer.lower()
         lower_question = question.lower()
-        has_structure = any(term in lower_answer for term in ["first", "second", "third", "finally", "step", "approach", "trade-off", "tradeoff"])
-        has_metrics = any(term in lower_answer for term in ["metric", "measure", "latency", "accuracy", "conversion", "retention", "cost", "precision", "recall", "sla"])
-        has_examples = any(term in lower_answer for term in ["for example", "in my", "when i", "we built", "i led", "project", "launched"])
-        has_risk = any(term in lower_answer for term in ["risk", "failure", "edge case", "monitor", "guardrail", "privacy", "security", "drift"])
-        has_clarification = any(term in lower_answer for term in ["assumption", "clarify", "constraint", "goal", "user", "requirement"])
+
+        has_structure = any(t in lower_answer for t in ["first", "second", "third", "finally", "step", "approach", "trade-off", "tradeoff"])
+        has_metrics = any(t in lower_answer for t in ["metric", "measure", "latency", "accuracy", "conversion", "retention", "cost", "precision", "recall", "sla"])
+        has_examples = any(t in lower_answer for t in ["for example", "in my", "when i", "we built", "i led", "project", "launched"])
+        has_risk = any(t in lower_answer for t in ["risk", "failure", "edge case", "monitor", "guardrail", "privacy", "security", "drift"])
+        has_clarification = any(t in lower_answer for t in ["assumption", "clarify", "constraint", "goal", "user", "requirement"])
+
         context_terms = self._context_terms(retrieved_context)
-        context_hits = [term for term in context_terms if term in lower_answer]
+        context_hits = [t for t in context_terms if t in lower_answer]
         has_context_grounding = len(context_hits) >= 2
 
         answer_length_score = 4 if len(words) < 35 else 6 if len(words) < 80 else 8 if len(words) < 180 else 7
@@ -77,9 +402,7 @@ class AIService:
         }
         overall = min(100, round(sum(scores.values()) * 2))
 
-        strengths = []
-        weaknesses = []
-        suggestions = []
+        strengths, weaknesses, suggestions = [], [], []
 
         if has_structure:
             strengths.append("Your answer had a clear structure, which makes it easier for an interviewer to follow.")
@@ -112,6 +435,7 @@ class AIService:
         elif retrieved_context:
             weaknesses.append("You did not use the uploaded resume/JD/company context enough.")
             suggestions.append("Pull in 1-2 concrete details from the uploaded context and explain why they matter for this role.")
+
         if not weaknesses:
             weaknesses.append("The next improvement is sharpening the final recommendation and trade-off language.")
         if not suggestions:
@@ -123,7 +447,6 @@ class AIService:
             "Risk and Trade-offs" if not has_risk else
             category
         )
-        follow_up = self._mock_follow_up_question(question, category, weak_area, lower_question)
 
         return {
             "concept_accuracy": scores["concept_accuracy"],
@@ -131,24 +454,37 @@ class AIService:
             "clarity": scores["clarity"],
             "examples": scores["examples"],
             "interview_readiness": scores["interview_readiness"],
-            "overall_score": min(overall, 100),
+            "overall_score": overall,
             "strengths": strengths[:3],
             "weaknesses": weaknesses[:3],
             "improvement_suggestions": suggestions[:3],
             "ideal_answer": self._mock_ideal_answer(question, category, lower_question),
             "improved_user_answer": self._mock_rewrite(question, answer, category),
-            "follow_up_question": follow_up,
-            "detected_weak_area": weak_area
+            "follow_up_question": self._mock_follow_up_question(question, category, weak_area, lower_question),
+            "detected_weak_area": weak_area,
         }
 
     def _mock_ideal_answer(self, question: str, category: str, lower_question: str) -> str:
         if "metric" in lower_question or category.lower() in {"metrics", "evaluation"}:
-            return "A strong answer defines the user or business goal, names input and output metrics, separates leading indicators from lagging outcomes, discusses guardrail metrics, and explains how the team would make decisions from the data."
+            return (
+                "A strong answer defines the user or business goal, names input and output metrics, "
+                "separates leading indicators from lagging outcomes, discusses guardrail metrics, "
+                "and explains how the team would make decisions from the data."
+            )
         if "design" in lower_question or "system" in category.lower():
-            return "A strong answer clarifies requirements, proposes a high-level architecture, explains data flow, handles scale and failure modes, names trade-offs, and closes with monitoring and iteration."
+            return (
+                "A strong answer clarifies requirements, proposes a high-level architecture, explains data flow, "
+                "handles scale and failure modes, names trade-offs, and closes with monitoring and iteration."
+            )
         if "behavior" in category.lower():
-            return "A strong answer uses STAR: situation, task, action, and result. It should make your role explicit, quantify impact, and reflect on what you would do differently."
-        return "A strong answer starts by clarifying the goal, gives a structured approach, grounds the reasoning in an example, discusses trade-offs or risks, and ends with how success would be measured."
+            return (
+                "A strong answer uses STAR: situation, task, action, and result. "
+                "It should make your role explicit, quantify impact, and reflect on what you would do differently."
+            )
+        return (
+            "A strong answer starts by clarifying the goal, gives a structured approach, grounds the reasoning "
+            "in an example, discusses trade-offs or risks, and ends with how success would be measured."
+        )
 
     def _mock_rewrite(self, question: str, answer: str, category: str) -> str:
         return (
@@ -167,195 +503,3 @@ class AIService:
         if "scale" in lower_question or "system" in category.lower():
             return "Now scale your answer by 10x. What breaks first, and what would you redesign?"
         return f"Go one level deeper on {category}: what trade-off would a strong interviewer expect you to notice?"
-
-    async def generate_question(
-        self,
-        role: str,
-        company_mode: str,
-        difficulty: str,
-        interview_type: str,
-        focus_area: Optional[str],
-        previous_questions: List[str],
-        retrieved_context: Optional[List[Dict[str, str]]] = None,
-    ) -> Dict[str, str]:
-        focus = focus_area or interview_type or "General"
-        if not self.client:
-            return self._get_mock_question(role, company_mode, difficulty, interview_type, focus, previous_questions, retrieved_context)
-
-        context_text = "\n\n".join(
-            f"[{item.get('source_type', 'context')}: {item.get('title', 'Untitled')}]\n{item.get('content', '')}"
-            for item in (retrieved_context or [])
-        )
-
-        prompt = f"""
-        You are a senior interviewer creating one realistic mock interview question.
-
-        Candidate role: {role}
-        Company style: {company_mode}
-        Difficulty: {difficulty}
-        Interview type: {interview_type}
-        Focus area: {focus}
-        Questions already asked: {previous_questions}
-        Retrieved candidate/job/company context:
-        {context_text or "No retrieved context was available."}
-
-        Create a question that is specific, interview-realistic, and not a trivia prompt.
-        If retrieved context exists, ground the question in it without inventing facts not present in the context.
-        Return ONLY valid JSON:
-        {{
-          "role": "{role}",
-          "category": "short category",
-          "difficulty": "{difficulty}",
-          "company_mode": "{company_mode}",
-          "question_text": "one interview question",
-          "ideal_answer": "concise coverage checklist for a strong answer"
-        }}
-        """
-
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "system", "content": prompt}],
-                response_format={"type": "json_object"},
-            )
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            print(f"Error generating question: {e}")
-            return self._get_mock_question(role, company_mode, difficulty, interview_type, focus, previous_questions, retrieved_context)
-
-    def _get_mock_question(
-        self,
-        role: str,
-        company_mode: str,
-        difficulty: str,
-        interview_type: str,
-        focus_area: str,
-        previous_questions: List[str],
-        retrieved_context: Optional[List[Dict[str, str]]] = None,
-    ) -> Dict[str, str]:
-        category = focus_area if focus_area and focus_area != "General" else interview_type
-        if retrieved_context:
-            primary_context = retrieved_context[0]
-            source_label = primary_context.get("source_type", "context").replace("_", " ")
-            source_title = primary_context.get("title", "uploaded context")
-            snippet = " ".join(primary_context.get("content", "").split())[:260]
-            return {
-                "role": role,
-                "category": "Resume-based" if source_label == "resume" else category,
-                "difficulty": difficulty if difficulty != "Mixed" else "Medium",
-                "company_mode": company_mode,
-                "question_text": (
-                    f"Your uploaded {source_label} ({source_title}) includes: \"{snippet}\". "
-                    f"In a {role} interview at {company_mode}, walk me through the most relevant experience or decision here. "
-                    "What was the problem, what trade-offs did you make, what did you measure, and what would you do differently?"
-                ),
-                "ideal_answer": (
-                    "A strong answer ties directly to the uploaded context, makes the candidate's role explicit, "
-                    "explains the decision and trade-offs, quantifies impact where possible, and reflects on learning."
-                ),
-            }
-        if "product" in role.lower():
-            question = f"You're PM for an AI interview coach at {company_mode}. Candidate completion is high, but users are not improving. What would you diagnose, build, and measure?"
-            ideal = "Clarify user segments, define readiness metrics, inspect funnel and feedback quality, prioritize interventions, guard against vanity metrics, and propose an experiment plan."
-        elif "data" in role.lower():
-            question = f"A {company_mode} team says interview practice improves hiring outcomes, but the data is noisy. How would you design the analysis?"
-            ideal = "Define cohorts, baseline, leading and lagging metrics, confounders, experiment or quasi-experiment design, guardrails, and decision thresholds."
-        elif "software" in role.lower():
-            question = f"Design the backend for a live mock interview platform. How would you handle sessions, transcript events, scoring jobs, and failures?"
-            ideal = "Cover APIs, data model, queues, streaming events, retries, idempotency, storage, observability, privacy, and scale trade-offs."
-        else:
-            question = f"Design an adaptive AI mock interview system for {role} candidates at {company_mode}. How should it choose the next question after each answer?"
-            ideal = "Cover candidate profile, rubric scoring, weak-area detection, question selection, follow-up probes, evaluation data, guardrails, and continuous improvement."
-
-        if previous_questions and question in previous_questions:
-            question = f"Follow-up on {category}: what is the hardest trade-off in your previous approach, and how would you defend it to a skeptical interviewer?"
-
-        return {
-            "role": role,
-            "category": category,
-            "difficulty": difficulty if difficulty != "Mixed" else "Medium",
-            "company_mode": company_mode,
-            "question_text": question,
-            "ideal_answer": ideal,
-        }
-
-    async def evaluate_answer(
-        self,
-        question: str,
-        answer: str,
-        category: str,
-        difficulty: str,
-        company_mode: str,
-        retrieved_context: Optional[List[Dict[str, str]]] = None,
-    ) -> Dict[str, Any]:
-        if not self.client:
-            return self._get_mock_evaluation(question, answer, category, retrieved_context)
-
-        context_text = "\n\n".join(
-            f"[{item.get('source_type', 'context')}: {item.get('title', 'Untitled')}]\n{item.get('content', '')}"
-            for item in (retrieved_context or [])
-        )
-        
-        prompt = f"""
-        You are a senior technical interviewer evaluating a candidate's answer.
-        
-        Question: {question}
-        Candidate answer: {answer}
-        Category: {category}
-        Difficulty: {difficulty}
-        Company interview style: {company_mode}
-        Retrieved candidate/job/company context:
-        {context_text or "No retrieved context was available."}
-        
-        Evaluate the answer using this rubric:
-        1. Accuracy (0-10)
-        2. Depth (0-10)
-        3. Clarity (0-10)
-        4. Examples (0-10)
-        5. Readiness (0-10)
-        
-        Return ONLY valid JSON in this exact format:
-        {{
-          "concept_accuracy": 0-10,
-          "technical_depth": 0-10,
-          "clarity": 0-10,
-          "examples": 0-10,
-          "interview_readiness": 0-10,
-          "overall_score": 0-100,
-          "strengths": ["string"],
-          "weaknesses": ["string"],
-          "improvement_suggestions": ["string"],
-          "ideal_answer": "string",
-          "improved_user_answer": "string",
-          "follow_up_question": "string",
-          "detected_weak_area": "string"
-        }}
-        """
-        
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "system", "content": prompt}],
-                response_format={"type": "json_object"}
-            )
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            print(f"Error in evaluation: {e}")
-            return self._get_mock_evaluation(question, answer, category, retrieved_context)
-
-    async def transcribe_audio(self, audio_file_path: str) -> str:
-        if not self.client:
-            return "Mock: Transcription demo."
-        
-        try:
-            with open(audio_file_path, "rb") as audio_file:
-                transcript = self.client.audio.transcriptions.create(
-                    model=self.whisper_model, 
-                    file=audio_file
-                )
-            return transcript.text
-        except Exception as e:
-            print(f"Transcription error: {e}")
-            return "Error transcribing audio."
-
-ai_service = AIService()
