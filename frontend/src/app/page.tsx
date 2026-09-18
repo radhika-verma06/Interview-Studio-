@@ -1,0 +1,68 @@
+'use client';
+
+import { Mic, ArrowRight, Sparkles } from 'lucide-react';
+import Link from 'next/link';
+
+export default function LandingPage() {
+  return (
+    <div className="min-h-screen bg-[#040608] text-white studio-gradient overflow-hidden relative">
+      {/* Subtle overlay for better text contrast */}
+      <div className="absolute inset-0 bg-black/60 pointer-events-none" />
+      {/* Navigation */}
+      <nav className="flex items-center justify-between px-12 py-8 max-w-7xl mx-auto border-b border-white/5 relative z-10">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-full border border-[#d6b24d]/40 flex items-center justify-center bg-black/20 gold-glow">
+             <Mic className="w-6 h-6 text-[#d6b24d]" />
+          </div>
+          <div>
+            <span className="text-2xl font-serif font-bold tracking-tight">Interview Studio</span>
+            <div className="text-[10px] text-[#d6b24d] font-bold uppercase tracking-[0.2em] leading-none mt-0.5">High-Fidelity Practice</div>
+          </div>
+        </div>
+        <div className="hidden md:flex items-center gap-12">
+            <Link href="#features" className="text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors">Experience</Link>
+            <Link href="#methodology" className="text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors">Methodology</Link>
+            <Link href="#pricing" className="text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors">Access</Link>
+        </div>
+        <Link href="/login" className="px-8 py-3 rounded-xl border border-white/10 hover:border-white/30 text-xs font-bold uppercase tracking-widest transition-all">
+          Studio Login
+        </Link>
+      </nav>
+
+      {/* Hero Section */}
+      <main className="relative z-10 pt-20 pb-32">
+        <div className="max-w-7xl mx-auto px-12 text-center">
+            <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-[#d6b24d]/10 border border-[#d6b24d]/20 text-[#d6b24d] text-[10px] font-black uppercase tracking-[0.2em] mb-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                <Sparkles className="w-4 h-4" /> Now in Private Beta
+            </div>
+            
+            <h1 className="text-7xl md:text-9xl font-serif font-bold tracking-tight leading-[0.9] mb-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+                Practice Smarter.<br />
+                <span className="italic opacity-60">Record Faster.</span>
+            </h1>
+
+            <p className="max-w-2xl mx-auto text-xl text-slate-400 leading-relaxed font-medium mb-16 animate-in fade-in slide-in-from-bottom-10 duration-1000 delay-200">
+                Experience the first AI interview simulation built for the modern talent. Cinematic focus, turn-by-turn insights, and high-fidelity mock sessions.
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-6 animate-in fade-in slide-in-from-bottom-12 duration-1000 delay-300">
+                <Link href="/interview/setup" className="gold-pill px-12 py-6 rounded-2xl flex items-center justify-center gap-4 text-sm w-full sm:w-auto">
+                    Enter the Studio <ArrowRight className="w-5 h-5" />
+                </Link>
+                <Link href="/dashboard" className="px-12 py-6 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-300 text-sm font-bold uppercase tracking-widest transition-all w-full sm:w-auto">
+                    View Dashboard
+                </Link>
+            </div>
+        </div>
+      </main>
+
+      {/* Bottom Visual Shadow */}
+      <div className="absolute bottom-0 left-0 w-full h-[50vh] bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none" />
+      
+      {/* Abstract Mic Background Decoration */}
+      <div className="absolute -right-20 top-1/2 -translate-y-1/2 opacity-5 pointer-events-none">
+        <Mic className="w-[800px] h-[800px] text-white" />
+      </div>
+    </div>
+  );
+}
