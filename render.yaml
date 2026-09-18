@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: interview-studio-backend
+    runtime: python
+    repo: https://github.com/radhika-verma06/Interview-Studio-
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite:///./interview_iq.db
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        value: https://interview-studio-pqvkaes7c-radhika-verma06s-projects.vercel.app
