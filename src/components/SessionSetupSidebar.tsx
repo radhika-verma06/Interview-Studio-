@@ -152,6 +152,7 @@ export default function SessionSetupSidebar({ setup, setSetup }: SessionSetupSid
            </button>
         </div>
       </div>
+    </div>
     </>
   );
 }
