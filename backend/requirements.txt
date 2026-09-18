@@ -12,4 +12,3 @@ alembic
 pytest
 psycopg2-binary
 pypdf
-pysqlite3-binary
